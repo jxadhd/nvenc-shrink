@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.0 — 2026-11-06
+
+- Signed apt repository at https://jxadhd.github.io/nvenc-shrink/apt, updated
+  automatically on every release. Installing the `.deb` adds it once, so later
+  versions arrive with `apt upgrade`. Delete the source file to opt out.
+- Ready-made entry for Debian's extrepo (`packaging/extrepo/`)
+- Project website at https://jxadhd.github.io/nvenc-shrink
+
 ## 1.0.1 — 2026-11-06
 
 - Fix NVENC encodes failing on files with cover art or extra video tracks

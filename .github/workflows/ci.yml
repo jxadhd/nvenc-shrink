@@ -5,6 +5,7 @@ on:
     branches: [main]
     tags: ["v*"]
   pull_request:
+  workflow_dispatch:  # re-publish the apt repo / website without a new release
 
 jobs:
   test:
@@ -52,3 +53,59 @@ jobs:
             gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" \
               --title "nvenc-shrink $GITHUB_REF_NAME" --generate-notes
           fi
+
+  apt-repo:
+    # Adds the new .deb to the signed apt repository on GitHub Pages (gh-pages branch).
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: package
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    concurrency:
+      group: apt-repo
+      cancel-in-progress: false
+    env:
+      GH_TOKEN: ${{ github.token }}
+      APT_SIGNING_KEY: ${{ secrets.APT_SIGNING_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: packages
+          path: dist
+      - name: Check the signing key is configured
+        id: key
+        run: |
+          if [ -z "$APT_SIGNING_KEY" ]; then
+            echo "::warning::APT_SIGNING_KEY secret not set, so the apt repository was not updated"
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "$APT_SIGNING_KEY" | gpg --batch --import
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Check out the published site
+        if: steps.key.outputs.ok == 'true'
+        run: |
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}"
+          if git ls-remote --exit-code --heads "$url" gh-pages >/dev/null; then
+            git clone --depth 1 --branch gh-pages "$url" site
+          else
+            git init -b gh-pages site && git -C site remote add origin "$url"
+          fi
+      - name: Build and sign the repository
+        if: steps.key.outputs.ok == 'true'
+        run: |
+          debs=""
+          case "$GITHUB_REF" in refs/tags/v*) debs=$(ls dist/*.deb) ;; esac
+          python3 packaging/build_apt_repo.py site $debs --key "$(cat packaging/apt/KEY_FINGERPRINT)"
+          cp -r site-src/. site/
+      - name: Publish
+        if: steps.key.outputs.ok == 'true'
+        run: |
+          cd site
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet && { echo "nothing to publish"; exit 0; }
+          git commit -q -m "Publish ${GITHUB_REF_NAME}"
+          git push origin gh-pages

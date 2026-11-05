@@ -20,6 +20,9 @@ ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.search(r'__version__ = "([^"]+)"', (ROOT / "src/nvenc_shrink/__init__.py").read_text()).group(1)
 NAME = "nvenc-shrink"
 COMMANDS = ("shrink-library", "nvenc-shrink")
+REPO_URL = "https://jxadhd.github.io/nvenc-shrink/apt"
+KEYRING = f"/usr/share/keyrings/{NAME}-archive-keyring.gpg"
+SOURCES = f"/etc/apt/sources.list.d/{NAME}.sources"
 
 CONTROL = f"""Package: {NAME}
 Version: {VERSION}
@@ -42,6 +45,23 @@ POSTINST = f"""#!/bin/sh
 set -e
 mkdir -p /var/lib/{NAME}
 if [ -d /run/systemd/system ]; then systemctl daemon-reload || true; fi
+
+# On first install only, add the project's apt repository so `apt upgrade` delivers new
+# versions, unless something already points at it (e.g. `extrepo enable {NAME}`).
+# If you delete the file afterwards, upgrades won't put it back.
+if [ "$1" = configure ] && [ ! -e /var/lib/{NAME}/.apt-source-done ]; then
+    if [ ! -e {SOURCES} ] && ! grep -rqs "{REPO_URL}" /etc/apt/sources.list /etc/apt/sources.list.d/; then
+        cat > {SOURCES} <<EOF
+# Added by the {NAME} package so updates arrive with apt upgrade. Safe to delete.
+Types: deb
+URIs: {REPO_URL}
+Suites: stable
+Components: main
+Signed-By: {KEYRING}
+EOF
+    fi
+    touch /var/lib/{NAME}/.apt-source-done
+fi
 """
 PRERM = f"""#!/bin/sh
 set -e
@@ -54,7 +74,7 @@ POSTRM = f"""#!/bin/sh
 set -e
 if [ -d /run/systemd/system ]; then systemctl daemon-reload || true; fi
 rm -rf /usr/lib/{NAME}/nvenc_shrink/__pycache__
-if [ "$1" = purge ]; then rm -rf /var/lib/{NAME}; fi
+if [ "$1" = purge ]; then rm -rf /var/lib/{NAME} {SOURCES}; fi
 """
 
 LAUNCHER = f"""#!/usr/bin/python3
@@ -131,6 +151,11 @@ def main():
         for unit in (f"{NAME}.service", f"{NAME}.timer"):
             put(pkg / "usr/lib/systemd/system" / unit, (ROOT / "systemd" / unit).read_text())
         put(pkg / f"etc/{NAME}.conf", (ROOT / f"etc/{NAME}.conf").read_text())
+        keyring = pkg / KEYRING.lstrip("/")
+        keyring.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["gpg", "--batch", "--yes", "--dearmor", "-o", str(keyring),
+                        str(ROOT / f"packaging/apt/{NAME}-archive-keyring.asc")], check=True)
+        keyring.chmod(0o644)
 
         man = pkg / "usr/share/man/man1"
         gz(man / "shrink-library.1.gz", man_page())

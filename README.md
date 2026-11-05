@@ -50,14 +50,47 @@ unattended on a homelab box:
 sudo apt install ./nvenc-shrink_*_all.deb
 ```
 
-You get the `shrink-library` command (also available as `nvenc-shrink`),
-`man shrink-library`, `/etc/nvenc-shrink.conf`, and a nightly systemd timer
-that stays **off until you enable it**. It installs `ffmpeg` if you don't have it.
+That's the only manual download. Installing it also adds the project's signed
+apt repository, so **new versions arrive with `apt upgrade`** (including
+unattended-upgrades). You also get the `shrink-library` command (also available
+as `nvenc-shrink`), `man shrink-library`, `/etc/nvenc-shrink.conf`, and a nightly
+systemd timer that stays **off until you enable it**. It installs `ffmpeg` if
+you don't have it.
+
+<details>
+<summary>Other ways to add the apt repository</summary>
+
+**extrepo** (pending acceptance into Debian's extrepo list):
+
+```bash
+sudo apt install extrepo
+sudo extrepo enable nvenc-shrink
+sudo apt update && sudo apt install nvenc-shrink
+```
+
+**By hand:** save the [signing key](https://jxadhd.github.io/nvenc-shrink/apt/nvenc-shrink-archive-keyring.gpg)
+to `/usr/share/keyrings/nvenc-shrink-archive-keyring.gpg` and create
+`/etc/apt/sources.list.d/nvenc-shrink.sources`:
+
+```
+Types: deb
+URIs: https://jxadhd.github.io/nvenc-shrink/apt
+Suites: stable
+Components: main
+Signed-By: /usr/share/keyrings/nvenc-shrink-archive-keyring.gpg
+```
+
+Key fingerprint: `DCD4 51D8 AC46 4AA0 C41E 0265 D883 4581 2C96 1A2F`
+
+If you'd rather update by hand, delete `/etc/apt/sources.list.d/nvenc-shrink.sources`
+after installing. Upgrades of the package won't add it back.
+</details>
 
 **Any other Linux.** With Python 3.9+ and ffmpeg installed:
 
 ```bash
 pipx install "nvenc-shrink @ git+https://github.com/jxadhd/nvenc-shrink"
+pipx upgrade nvenc-shrink   # later, to update
 ```
 
 ## Quick start

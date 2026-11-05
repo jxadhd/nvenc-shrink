@@ -32,5 +32,15 @@ that touches when an original file gets deleted.
 ## Releasing
 
 1. Bump `__version__` in `src/nvenc_shrink/__init__.py` and add a `CHANGELOG.md` entry.
-2. Commit, then `git tag vX.Y.Z && git push --tags`.
-3. CI runs the tests, builds the `.deb`, wheel and sdist, and publishes the GitHub release.
+2. Commit and push to `main`.
+3. Publish a GitHub release with a new `vX.Y.Z` tag (or push the tag from git).
+4. CI runs the tests, attaches the `.deb`, wheel and sdist to the release, and
+   adds the `.deb` to the signed apt repository at
+   `https://jxadhd.github.io/nvenc-shrink/apt` (the `gh-pages` branch), so apt
+   users get it on their next `apt upgrade`.
+
+The apt repository is signed with the key in `packaging/apt/`. Its private half
+lives only in the `APT_SIGNING_KEY` repository secret. If that secret is missing,
+releases still work, but the apt repository isn't updated. To publish the
+landing page or re-sign without a release, run the CI workflow manually from
+the Actions tab.

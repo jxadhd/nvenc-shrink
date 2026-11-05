@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>nvenc-shrink</title>
+<meta name="description" content="Safely re-encode a Jellyfin, Plex or Emby library to HEVC and get your disk space back.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 112 112'%3E%3Crect x='8' y='16' width='96' height='80' rx='11' fill='none' stroke='%238c959f' stroke-width='6' stroke-dasharray='14 8'/%3E%3Crect x='48' y='48' width='48' height='40' rx='7' fill='%231a7f5a'/%3E%3C/svg%3E">
+<style>
+  :root {
+    --bg: #ffffff; --fg: #1b1f24; --muted: #57606a; --line: #d8dee4;
+    --card: #f6f8fa; --accent: #1a7f5a; --accent-fg: #ffffff; --code: #eef1f4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0d1117; --fg: #e6edf3; --muted: #9198a1; --line: #30363d;
+      --card: #151b23; --accent: #3fb984; --accent-fg: #0d1117; --code: #1c232c;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg);
+         font: 16px/1.6 -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 48px 16px 64px; }
+  .logo { display: block; width: min(460px, 100%); height: auto; margin: 0 0 8px -6px; }
+  .logo.dark { display: none; }
+  @media (prefers-color-scheme: dark) { .logo.light { display: none; } .logo.dark { display: block; } }
+  .lede { font-size: 1.15rem; color: var(--muted); margin: 0 0 28px; max-width: 34em; }
+  .actions { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 44px; }
+  .btn { display: inline-block; padding: 9px 16px; border-radius: 8px; text-decoration: none;
+         font-weight: 600; border: 1px solid var(--line); color: var(--fg); background: var(--card); }
+  .btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+  h2 { font-size: 1.25rem; margin: 40px 0 6px; }
+  p { margin: 0 0 14px; }
+  .muted { color: var(--muted); }
+  pre { background: var(--code); border: 1px solid var(--line); border-radius: 8px;
+        padding: 14px 16px; overflow-x: auto; font-size: 14px; line-height: 1.55; margin: 0 0 14px; }
+  code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", monospace; }
+  p code, li code { background: var(--code); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+  .tabs { display: grid; gap: 14px; }
+  .tabs > *, .features > * { min-width: 0; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 18px 18px 6px; }
+  .card h3 { margin: 0 0 4px; font-size: 1rem; }
+  .card .tag { font-size: 0.8rem; color: var(--accent); font-weight: 600; margin-left: 6px; }
+  .card pre { background: var(--bg); }
+  .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; margin-top: 12px; }
+  .features div { border-left: 3px solid var(--accent); padding: 2px 0 2px 12px; }
+  .features b { display: block; }
+  .features span { color: var(--muted); font-size: 0.95rem; }
+  footer { margin-top: 56px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.9rem; }
+  a { color: var(--accent); }
+  details { margin-top: 10px; }
+  summary { cursor: pointer; color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <img class="logo light" src="logo-light.svg" alt="nvenc-shrink" width="560" height="120">
+  <img class="logo dark" src="logo-dark.svg" alt="nvenc-shrink" width="560" height="120">
+  <p class="lede">Get disk space back from your Jellyfin, Plex or Emby library by re-encoding H.264 to HEVC.
+     It predicts the saving before it encodes, and verifies each result before an original is ever replaced.</p>
+  <div class="actions">
+    <a class="btn primary" href="#install">Install</a>
+    <a class="btn" href="https://github.com/jxadhd/nvenc-shrink">GitHub</a>
+    <a class="btn" href="https://github.com/jxadhd/nvenc-shrink/releases/latest">Latest release</a>
+  </div>
+
+  <div class="features">
+    <div><b>Predicts first</b><span>Three 20 s samples in RAM. Files that won't shrink are skipped in seconds.</span></div>
+    <div><b>Verifies before replacing</b><span>Duration, every stream, and a full decode pass, or the original stays.</span></div>
+    <div><b>Same name, same metadata</b><span>Watched state and Sonarr/Radarr keep working.</span></div>
+    <div><b>Gentle on disks</b><span>Read-capped encodes with pauses between files.</span></div>
+  </div>
+
+  <h2 id="install">Install</h2>
+  <p class="muted">Debian, Ubuntu and Proxmox (amd64, arm64, armhf). Every option below gives you updates through <code>apt upgrade</code>.</p>
+
+  <div class="tabs">
+    <div class="card">
+      <h3>From the .deb <span class="tag">recommended</span></h3>
+      <p class="muted">Download it from the <a href="https://github.com/jxadhd/nvenc-shrink/releases/latest">latest release</a>.
+         Installing it also adds this repository, so later versions arrive automatically.</p>
+<pre><code>sudo apt install ./nvenc-shrink_*_all.deb</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>With extrepo <span class="tag">pending</span></h3>
+      <p class="muted">Debian's tool for trusted third-party repositories. nvenc-shrink has been submitted;
+         these commands work once the entry is accepted.</p>
+<pre><code>sudo apt install extrepo
+sudo extrepo enable nvenc-shrink
+sudo apt update && sudo apt install nvenc-shrink</code></pre>
+    </div>
+
+    <div class="card">
+      <h3>Add the repository by hand</h3>
+      <p class="muted">Save the <a href="apt/nvenc-shrink-archive-keyring.gpg">signing key</a> to
+         <code>/usr/share/keyrings/nvenc-shrink-archive-keyring.gpg</code>, then create
+         <code>/etc/apt/sources.list.d/nvenc-shrink.sources</code>:</p>
+<pre><code>Types: deb
+URIs: https://jxadhd.github.io/nvenc-shrink/apt
+Suites: stable
+Components: main
+Signed-By: /usr/share/keyrings/nvenc-shrink-archive-keyring.gpg</code></pre>
+      <details><summary>Key fingerprint</summary>
+<pre><code>DCD4 51D8 AC46 4AA0 C41E  0265 D883 4581 2C96 1A2F</code></pre></details>
+    </div>
+  </div>
+
+  <h2>Then</h2>
+<pre><code>sudoedit /etc/nvenc-shrink.conf                  # list your library folders
+shrink-library                                   # dry run: what would change
+shrink-library --estimate --limit 10             # choose a quality setting
+shrink-library --apply --limit 5                 # convert a few, then watch them
+sudo systemctl enable --now nvenc-shrink.timer   # nightly from then on</code></pre>
+  <p class="muted">Full documentation is in the <a href="https://github.com/jxadhd/nvenc-shrink#readme">README</a>
+     and in <code>man shrink-library</code>.</p>
+
+  <footer>nvenc-shrink is MIT licensed. Not affiliated with NVIDIA.</footer>
+</main>
+</body>
+</html>

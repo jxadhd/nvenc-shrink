@@ -1,0 +1,11 @@
+description: nvenc-shrink - safely re-encode a media library (Jellyfin, Plex, Emby) to HEVC to save disk space
+gpg-key-checksum:
+  sha256: 45ff1eb9c28216fe800fae01e7f81ad7c03f23c63b7fd2dc40d12851cbc0c8e2
+gpg-key-file: nvenc-shrink.asc
+policy: main
+source:
+  Architectures: amd64 arm64 armhf i386
+  Components: main
+  Suites: stable
+  Types: deb
+  URIs: https://jxadhd.github.io/nvenc-shrink/apt
