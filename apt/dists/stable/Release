@@ -1,0 +1,56 @@
+Origin: nvenc-shrink
+Label: nvenc-shrink
+Suite: stable
+Codename: stable
+Date: Thu, 05 Nov 2026 13:35:36 GMT
+Architectures: amd64 arm64 armhf i386 all
+Components: main
+Description: nvenc-shrink: safely re-encode a media library to HEVC
+MD5Sum:
+ 062095d41e7b26dc790c3438de5e4d8c              894 main/binary-all/Packages
+ ef65e58003e1a966a27818163f6a6135              622 main/binary-all/Packages.gz
+ 4f8f9f023035f16d3df6afe926fc60e6               91 main/binary-all/Release
+ 062095d41e7b26dc790c3438de5e4d8c              894 main/binary-amd64/Packages
+ ef65e58003e1a966a27818163f6a6135              622 main/binary-amd64/Packages.gz
+ 09bdc3f0b763e1a78df1e9238a0ce478               93 main/binary-amd64/Release
+ 062095d41e7b26dc790c3438de5e4d8c              894 main/binary-arm64/Packages
+ ef65e58003e1a966a27818163f6a6135              622 main/binary-arm64/Packages.gz
+ 300ee6b525554f37704b20e2e07e0c62               93 main/binary-arm64/Release
+ 062095d41e7b26dc790c3438de5e4d8c              894 main/binary-armhf/Packages
+ ef65e58003e1a966a27818163f6a6135              622 main/binary-armhf/Packages.gz
+ 80ae968930fd65815c586f3e2d74bfcf               93 main/binary-armhf/Release
+ 062095d41e7b26dc790c3438de5e4d8c              894 main/binary-i386/Packages
+ ef65e58003e1a966a27818163f6a6135              622 main/binary-i386/Packages.gz
+ c42fef4af544ac8778b07c172a415790               92 main/binary-i386/Release
+SHA1:
+ 612bb6c0675fe9d301fc4f3163fcce709a3d460d              894 main/binary-all/Packages
+ 010fd059473c39cef536b32a22076a257e048c16              622 main/binary-all/Packages.gz
+ 3515253f6a4447270f4af6cccab043295880c087               91 main/binary-all/Release
+ 612bb6c0675fe9d301fc4f3163fcce709a3d460d              894 main/binary-amd64/Packages
+ 010fd059473c39cef536b32a22076a257e048c16              622 main/binary-amd64/Packages.gz
+ 1728241a37830a403b4ac9d01f402903e101fd71               93 main/binary-amd64/Release
+ 612bb6c0675fe9d301fc4f3163fcce709a3d460d              894 main/binary-arm64/Packages
+ 010fd059473c39cef536b32a22076a257e048c16              622 main/binary-arm64/Packages.gz
+ c91c0614277248bec5bdc129334e0bce70e75039               93 main/binary-arm64/Release
+ 612bb6c0675fe9d301fc4f3163fcce709a3d460d              894 main/binary-armhf/Packages
+ 010fd059473c39cef536b32a22076a257e048c16              622 main/binary-armhf/Packages.gz
+ d6e62369164e68e1ee7d8652c3a7ce7fd14aef29               93 main/binary-armhf/Release
+ 612bb6c0675fe9d301fc4f3163fcce709a3d460d              894 main/binary-i386/Packages
+ 010fd059473c39cef536b32a22076a257e048c16              622 main/binary-i386/Packages.gz
+ 07a39204d1bc21f1248cdfca422bbfead7dbd0b0               92 main/binary-i386/Release
+SHA256:
+ 4ae402026dbf9778a88cfaf327f660872ef2eee054e2b084173af0920dcfe48e              894 main/binary-all/Packages
+ c805a4acd9117e9de67ac9e0f51cc45dbe1496e8312a3264edbfd2679b88e63d              622 main/binary-all/Packages.gz
+ 07c33629284297a077082b81caf2c6b39e0c5446ce37db9366ee9403cfc973f3               91 main/binary-all/Release
+ 4ae402026dbf9778a88cfaf327f660872ef2eee054e2b084173af0920dcfe48e              894 main/binary-amd64/Packages
+ c805a4acd9117e9de67ac9e0f51cc45dbe1496e8312a3264edbfd2679b88e63d              622 main/binary-amd64/Packages.gz
+ 7d23c515c51978b08e774de86982ed5aa5034fc14895ff0aa55d6186982f270b               93 main/binary-amd64/Release
+ 4ae402026dbf9778a88cfaf327f660872ef2eee054e2b084173af0920dcfe48e              894 main/binary-arm64/Packages
+ c805a4acd9117e9de67ac9e0f51cc45dbe1496e8312a3264edbfd2679b88e63d              622 main/binary-arm64/Packages.gz
+ 3aded274f309afdc5cd78b47606f82fb20719b4a01a7e847f9fece6a643b2a07               93 main/binary-arm64/Release
+ 4ae402026dbf9778a88cfaf327f660872ef2eee054e2b084173af0920dcfe48e              894 main/binary-armhf/Packages
+ c805a4acd9117e9de67ac9e0f51cc45dbe1496e8312a3264edbfd2679b88e63d              622 main/binary-armhf/Packages.gz
+ 39e53716641b2c18e60cfeb8524da75cf45278af53c7ca90dfe5c52081a72f03               93 main/binary-armhf/Release
+ 4ae402026dbf9778a88cfaf327f660872ef2eee054e2b084173af0920dcfe48e              894 main/binary-i386/Packages
+ c805a4acd9117e9de67ac9e0f51cc45dbe1496e8312a3264edbfd2679b88e63d              622 main/binary-i386/Packages.gz
+ 527097d09f4d342b484b0cf8c75e007c2fcd375b1adf896aaa09a49de1153468               92 main/binary-i386/Release
