@@ -37,3 +37,23 @@ Size: 20784
 MD5sum: 319f15e3dcaa9f6a9d06040dbc125b9f
 SHA1: 682b5896af484b14c91108b7a8726fed19377ab8
 SHA256: c14a18f8bb8fe933f4d24a5d879dcc18946c9a88a82e27ccafdd7c02055f1fbf
+
+Package: nvenc-shrink
+Version: 1.1.2
+Section: video
+Priority: optional
+Architecture: all
+Depends: python3 (>= 3.9), ffmpeg
+Maintainer: Josh Cross <me@joshcross.co.nz>
+Homepage: https://github.com/jxadhd/nvenc-shrink
+Description: safely re-encode a media library to HEVC to save disk space
+ Re-encodes H.264/MPEG-4/VC-1 video in a Jellyfin, Plex or Emby library to
+ HEVC with NVIDIA NVENC, or CPU x265 as a fallback. Each file is predicted
+ from short samples, encoded beside the original, verified, and only then
+ swapped in under the same name. It throttles disk IO, skips HDR, hardlinked
+ and already-efficient files, and keeps state so it can run nightly.
+Filename: pool/main/n/nvenc-shrink/nvenc-shrink_1.1.2_all.deb
+Size: 23540
+MD5sum: dad7435240b0ba2b93c240ff635c13e0
+SHA1: 1df64f8f513fdb216f14dba3cfee3b24d68eafa2
+SHA256: 2016ce39cffd55b4850c53e40af08002f755e64a39cd441ad08692016086c41a
