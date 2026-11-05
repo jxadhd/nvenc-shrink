@@ -214,16 +214,25 @@ def detect_nvenc_features(args):
     raise RuntimeError("hevc_nvenc unavailable (no NVIDIA GPU/driver visible, or ffmpeg built without NVENC)")
 
 
-def video_encoder_args(args, cq):
+def video_encoder_args(args, cq, stream="v"):
+    """Encoder options, each qualified with an output stream specifier (e.g. "-profile:0").
+
+    Qualifying matters: an unqualified option like -profile also applies to streams that
+    are only being copied (cover art, extra video tracks), and ffmpeg refuses to open the
+    output if it can't set it there."""
     if args.encoder == "hevc_nvenc":
-        out = ["-preset", "p7", "-tune", "hq", "-rc", "vbr", "-cq", str(cq), "-b:v", "0",
-               "-spatial-aq", "1", "-rc-lookahead", "32", *args.nvenc_extra]
-        out += ["-profile:v", "main10", "-pix_fmt", "p010le"] if args.ten_bit else ["-profile:v", "main"]
-        return out
-    if args.encoder == "libx265":
-        return ["-preset", "medium", "-crf", str(cq), "-x265-params", "log-level=error",
-                "-pix_fmt", "yuv420p10le" if args.ten_bit else "yuv420p"]
-    raise SystemExit(f"unsupported encoder {args.encoder}")
+        pairs = ["-preset", "p7", "-tune", "hq", "-rc", "vbr", "-cq", str(cq), "-b", "0",
+                 "-spatial-aq", "1", "-rc-lookahead", "32", *args.nvenc_extra]
+        pairs += ["-profile", "main10", "-pix_fmt", "p010le"] if args.ten_bit else ["-profile", "main"]
+    elif args.encoder == "libx265":
+        pairs = ["-preset", "medium", "-crf", str(cq), "-x265-params", "log-level=error",
+                 "-pix_fmt", "yuv420p10le" if args.ten_bit else "yuv420p"]
+    else:
+        raise SystemExit(f"unsupported encoder {args.encoder}")
+    out = []
+    for opt, value in zip(pairs[::2], pairs[1::2]):
+        out += [f"{opt.split(':')[0]}:{stream}", value]
+    return out
 
 
 SAMPLE_SECS = 20
@@ -305,7 +314,7 @@ def build_cmd(src, dst, info, args):
             if s.get("disposition", {}).get("attached_pic"):
                 codec_args += [f"-c:{out_idx}", "copy"]
             else:
-                codec_args += [f"-c:{out_idx}", args.encoder]
+                codec_args += [f"-c:{out_idx}", args.encoder, *video_encoder_args(args, args.cq, str(out_idx))]
                 if is_mp4:
                     codec_args += [f"-tag:{out_idx}", "hvc1"]  # Apple/TV players need hvc1, not hev1
             out_idx += 1
@@ -324,7 +333,6 @@ def build_cmd(src, dst, info, args):
     cmd += codec_args
     cmd += ["-map_metadata", "0", "-map_chapters", "0"]
 
-    cmd += video_encoder_args(args, args.cq)
 
     if is_mp4:
         cmd += ["-movflags", "+faststart"]

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.1 — 2026-11-06
+
+- Fix NVENC encodes failing on files with cover art or extra video tracks
+  ("Unable to parse option value \"main\""). Encoder options now apply only to
+  the stream being encoded. Originals were never affected: the encode failed
+  before anything was written.
+
 ## 1.0.0 — 2026-11-06
 
 First public release.

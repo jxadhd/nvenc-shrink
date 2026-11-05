@@ -142,6 +142,53 @@ class EndToEnd(unittest.TestCase):
         self.assertIn("saved so far", r.stdout)
 
 
+class EncoderOptions(unittest.TestCase):
+    """Encoder options must target only the encoded stream, never copied ones (e.g. cover art).
+
+    Regression: an unqualified `-profile:v main` also hit the copied cover-art stream on
+    NVENC runs, and ffmpeg refused to open the output ("Unable to parse option value")."""
+
+    def build(self, encoder):
+        sys.path.insert(0, str(ROOT / "src"))
+        from argparse import Namespace
+        from nvenc_shrink import cli
+        info = {"streams": [
+            {"index": 0, "codec_type": "video", "codec_name": "h264", "disposition": {"attached_pic": 0}},
+            {"index": 1, "codec_type": "audio", "codec_name": "aac", "disposition": {}},
+            {"index": 2, "codec_type": "video", "codec_name": "mjpeg", "disposition": {"attached_pic": 1}},
+        ], "format": {"duration": "10"}}
+        args = Namespace(encoder=encoder, cq=27, ten_bit=False, hw_decode=False, max_read_mbps=0,
+                         nvenc_extra=["-bf", "0"])
+        return cli.build_cmd(Path("/x/in.mp4"), Path("/x/in.mp4.shrinking-tmp"), info, args)
+
+    def test_options_are_stream_qualified(self):
+        for encoder in ("hevc_nvenc", "libx265"):
+            cmd = self.build(encoder)
+            encoder_opts = {"-preset", "-tune", "-rc", "-cq", "-b", "-spatial-aq", "-rc-lookahead", "-bf",
+                            "-profile", "-pix_fmt", "-crf", "-x265-params", "-temporal-aq", "-b_ref_mode"}
+            for word in cmd:
+                if word.startswith("-") and word.split(":")[0] in encoder_opts:
+                    self.assertEqual(word.split(":", 1)[1:], ["0"], f"{encoder}: {word} isn't limited to stream 0")
+            self.assertIn("-profile:0" if encoder == "hevc_nvenc" else "-crf:0", cmd)
+
+    def test_cover_art_with_profile_encodes(self):
+        """Real ffmpeg run with a -profile option and a copied cover (x265 stands in for NVENC)."""
+        tmp = Path(tempfile.mkdtemp(prefix="nvenc-shrink-opt-"))
+        try:
+            make_clip(tmp / "v.mp4", secs=2)
+            ff("-f", "lavfi", "-i", "color=red:s=100x100", "-frames:v", "1", str(tmp / "c.jpg"))
+            ff("-i", str(tmp / "v.mp4"), "-i", str(tmp / "c.jpg"), "-map", "0", "-map", "1", "-c", "copy",
+               "-disposition:v:1", "attached_pic", str(tmp / "in.mp4"))
+            r = subprocess.run(["ffmpeg", "-v", "error", "-y", "-i", str(tmp / "in.mp4"),
+                                "-map", "0:0", "-map", "0:1", "-map", "0:2",
+                                "-c:0", "libx265", "-profile:0", "main", "-crf:0", "30",
+                                "-x265-params:0", "log-level=error", "-c:1", "copy", "-c:2", "copy",
+                                str(tmp / "out.mp4")], capture_output=True, text=True)
+            self.assertEqual(r.returncode, 0, r.stderr)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+
 class Config(unittest.TestCase):
     def test_apply_not_allowed_in_config(self):
         with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as f:
