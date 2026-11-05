@@ -60,7 +60,7 @@ you don't have it.
 <details>
 <summary>Other ways to add the apt repository</summary>
 
-**extrepo** (pending acceptance into Debian's extrepo list):
+**extrepo** (coming soon: works once nvenc-shrink is listed in Debian's extrepo):
 
 ```bash
 sudo apt install extrepo
