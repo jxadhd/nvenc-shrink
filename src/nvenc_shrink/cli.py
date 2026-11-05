@@ -39,7 +39,6 @@ from nvenc_shrink import __version__
 
 PROG = "nvenc-shrink"
 SYSTEM_CONF = "/etc/nvenc-shrink.conf"
-LEGACY_SYSTEM_CONF = "/etc/shrink-library.conf"  # pre-1.0 name
 USER_CONF = os.path.join(os.environ.get("XDG_CONFIG_HOME", os.path.expanduser("~/.config")), "nvenc-shrink.conf")
 DEFAULT_CQ = {"hevc_nvenc": 27, "libx265": 24}
 DEFAULT_ESTIMATE_CQ = {"hevc_nvenc": [24, 27, 30], "libx265": [22, 24, 26]}
@@ -51,15 +50,10 @@ def conf_path():
         return os.environ["NVENC_SHRINK_CONF"]
     if os.path.isfile(USER_CONF) and os.geteuid() != 0:
         return USER_CONF
-    if not os.path.isfile(SYSTEM_CONF) and os.path.isfile(LEGACY_SYSTEM_CONF):
-        return LEGACY_SYSTEM_CONF
     return SYSTEM_CONF
 
 
 def default_db():
-    legacy = os.path.expanduser("~/.shrink-library.db")  # used by pre-1.0 versions
-    if os.path.exists(legacy):
-        return legacy
     if os.geteuid() == 0:
         return "/var/lib/nvenc-shrink/state.db"
     state = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
@@ -248,7 +242,7 @@ def predict_size(src, info, args, cq):
     secs = min(SAMPLE_SECS, max(2.0, dur / 10))
     tmpdir = "/dev/shm" if os.path.isdir("/dev/shm") else None
     src_bytes = enc_bytes = 0
-    with tempfile.TemporaryDirectory(prefix="shrink-sample-", dir=tmpdir) as d:
+    with tempfile.TemporaryDirectory(prefix="nvenc-shrink-sample-", dir=tmpdir) as d:
         for n, frac in enumerate(SAMPLE_POINTS):
             start = f"{dur * frac:.2f}"
             t0, t1 = dur * frac, dur * frac + secs
@@ -500,7 +494,7 @@ def select_encoder(args):
 
 
 def build_parser():
-    ap = argparse.ArgumentParser(prog=os.path.basename(sys.argv[0]) if sys.argv[0] and not sys.argv[0].endswith(".py") else PROG,
+    ap = argparse.ArgumentParser(prog=PROG,
                                  description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("roots", nargs="*", help="library folders to scan (default: from the config file)")

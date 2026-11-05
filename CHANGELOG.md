@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.1.1 — 2026-11-06
+
+- The command is now only `nvenc-shrink` (and `man nvenc-shrink`).
+  The old `shrink-library` name is gone, so update any scripts or cron jobs that
+  call it. The bundled systemd service is updated automatically.
+- Removed fallbacks for pre-release file locations (`/etc/shrink-library.conf`,
+  `~/.shrink-library.db`).
+
 ## 1.1.0 — 2026-11-06
 
 - Signed apt repository at https://jxadhd.github.io/nvenc-shrink/apt, updated

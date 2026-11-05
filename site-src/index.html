@@ -108,12 +108,12 @@ Signed-By: /usr/share/keyrings/nvenc-shrink-archive-keyring.gpg</code></pre>
 
   <h2>Then</h2>
 <pre><code>sudoedit /etc/nvenc-shrink.conf                  # list your library folders
-shrink-library                                   # dry run: what would change
-shrink-library --estimate --limit 10             # choose a quality setting
-shrink-library --apply --limit 5                 # convert a few, then watch them
+nvenc-shrink                                     # dry run: what would change
+nvenc-shrink --estimate --limit 10               # choose a quality setting
+nvenc-shrink --apply --limit 5                   # convert a few, then watch them
 sudo systemctl enable --now nvenc-shrink.timer   # nightly from then on</code></pre>
   <p class="muted">Full documentation is in the <a href="https://github.com/jxadhd/nvenc-shrink#readme">README</a>
-     and in <code>man shrink-library</code>.</p>
+     and in <code>man nvenc-shrink</code>.</p>
 
   <footer>nvenc-shrink is MIT licensed. Not affiliated with NVIDIA.</footer>
 </main>

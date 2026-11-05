@@ -18,7 +18,7 @@
 </p>
 
 ```console
-$ shrink-library --apply
+$ nvenc-shrink --apply
 checking .../Apex (2026).mp4  [h264 1920x872 2639 kbps, 1.8GB]
   skipping: samples predict 1.8GB -> ~2.7GB, not worth a full encode
 checking .../Whisper of the Heart (1995).mkv  [h264 1920x1038 15956 kbps, 12.4GB]
@@ -52,8 +52,8 @@ sudo apt install ./nvenc-shrink_*_all.deb
 
 That's the only manual download. Installing it also adds the project's signed
 apt repository, so **new versions arrive with `apt upgrade`** (including
-unattended-upgrades). You also get the `shrink-library` command (also available
-as `nvenc-shrink`), `man shrink-library`, `/etc/nvenc-shrink.conf`, and a nightly
+unattended-upgrades). You also get the `nvenc-shrink` command,
+`man nvenc-shrink`, `/etc/nvenc-shrink.conf`, and a nightly
 systemd timer that stays **off until you enable it**. It installs `ffmpeg` if
 you don't have it.
 
@@ -106,13 +106,13 @@ pipx upgrade nvenc-shrink   # later, to update
 **2. Dry run.** This shows what it would convert and changes nothing:
 
 ```bash
-shrink-library
+nvenc-shrink
 ```
 
 **3. Choose a quality setting.** This predicts sizes at several settings and converts nothing:
 
 ```bash
-shrink-library --estimate --limit 10
+nvenc-shrink --estimate --limit 10
 ```
 
 Each file shows its predicted size at `cq` 24, 27 and 30 (22, 24 and 26 on x265),
@@ -123,7 +123,7 @@ saving you're happy with, and put it in the config.
 motion and anything grainy on your real TV:
 
 ```bash
-shrink-library --apply --limit 5
+nvenc-shrink --apply --limit 5
 ```
 
 **5. Let it run every night:**
@@ -137,7 +137,7 @@ It starts at 03:00. To change that, run `sudo systemctl edit nvenc-shrink.timer`
 ### Day to day
 
 ```bash
-shrink-library --status               # files done, space saved, recent failures
+nvenc-shrink --status                 # files done, space saved, recent failures
 journalctl -u nvenc-shrink -f         # watch tonight's run live
 sudo systemctl stop nvenc-shrink      # stop at any time, safely
 ```
@@ -176,7 +176,7 @@ it mid-encode. If a run is interrupted, the next one cleans up the partial file.
 - **Disk IO.** `--max-read-mbps` (default 8) and `--pause` (default 30 s). A 1080p
   stream needs about 1–2 MB/s, so the defaults leave plenty of headroom.
 
-`shrink-library --help` or `man shrink-library` lists every option.
+`nvenc-shrink --help` or `man nvenc-shrink` lists every option.
 
 ## Good to know
 

@@ -31,7 +31,6 @@ Issues = "https://github.com/jxadhd/nvenc-shrink/issues"
 Changelog = "https://github.com/jxadhd/nvenc-shrink/blob/main/CHANGELOG.md"
 
 [project.scripts]
-shrink-library = "nvenc_shrink.cli:main"
 nvenc-shrink = "nvenc_shrink.cli:main"
 
 [tool.setuptools.dynamic]

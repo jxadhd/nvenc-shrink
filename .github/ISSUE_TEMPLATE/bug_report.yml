@@ -13,7 +13,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: "`shrink-library --version`"
+      description: "`nvenc-shrink --version`"
     validations:
       required: true
   - type: input

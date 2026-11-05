@@ -8,7 +8,7 @@ differently.
 
 Open an issue and include:
 
-- `shrink-library --version`
+- `nvenc-shrink --version`
 - `ffmpeg -version | head -1`
 - your GPU (`nvidia-smi -L`), or "CPU only"
 - the log lines around the problem (`journalctl -u nvenc-shrink`, or the terminal output)

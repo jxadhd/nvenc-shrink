@@ -1,12 +1,12 @@
 [Unit]
 Description=Re-encode media library to HEVC (nvenc-shrink)
-Documentation=https://github.com/jxadhd/nvenc-shrink man:shrink-library(1)
+Documentation=https://github.com/jxadhd/nvenc-shrink man:nvenc-shrink(1)
 After=local-fs.target
 
 [Service]
 Type=oneshot
 # Folders and options come from /etc/nvenc-shrink.conf.
-ExecStart=/usr/bin/shrink-library --apply
+ExecStart=/usr/bin/nvenc-shrink --apply
 Nice=10
 IOSchedulingClass=idle
 # `systemctl stop` aborts the current file, removes its partial output and leaves the original untouched.

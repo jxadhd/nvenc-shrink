@@ -19,7 +19,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 VERSION = re.search(r'__version__ = "([^"]+)"', (ROOT / "src/nvenc_shrink/__init__.py").read_text()).group(1)
 NAME = "nvenc-shrink"
-COMMANDS = ("shrink-library", "nvenc-shrink")
 REPO_URL = "https://jxadhd.github.io/nvenc-shrink/apt"
 KEYRING = f"/usr/share/keyrings/{NAME}-archive-keyring.gpg"
 SOURCES = f"/etc/apt/sources.list.d/{NAME}.sources"
@@ -87,19 +86,19 @@ main()
 
 
 def man_page():
-    """A real man page built from --help, so `man shrink-library` matches the code."""
+    """A real man page built from --help, so `man nvenc-shrink` matches the code."""
     env = {**os.environ, "PYTHONPATH": str(ROOT / "src"), "NVENC_SHRINK_CONF": "/nonexistent", "COLUMNS": "80"}
     help_text = subprocess.run([sys.executable, "-c",
-                                "import sys; sys.argv[0]='shrink-library'; from nvenc_shrink.cli import build_parser;"
+                                "import sys; from nvenc_shrink.cli import build_parser;"
                                 "build_parser().print_help()"],
                                capture_output=True, text=True, env=env, check=True).stdout
     esc = lambda t: t.replace("\\", "\\e").replace("-", "\\-").replace("\n.", "\n\\&.").replace("\n'", "\n\\&'")
     date = dt.date.today().strftime("%B %Y")
-    return f""".TH SHRINK\\-LIBRARY 1 "{date}" "{NAME} {VERSION}" "User Commands"
+    return f""".TH NVENC\\-SHRINK 1 "{date}" "{NAME} {VERSION}" "User Commands"
 .SH NAME
-shrink\\-library, nvenc\\-shrink \\- safely re\\-encode a media library to HEVC to save disk space
+nvenc\\-shrink \\- safely re\\-encode a media library to HEVC to save disk space
 .SH SYNOPSIS
-.B shrink\\-library
+.B nvenc\\-shrink
 [\\fIoptions\\fR] [\\fIfolder\\fR ...]
 .SH DESCRIPTION
 .nf
@@ -146,8 +145,7 @@ def main():
         # Code lives in a private dir so it never clashes with a pipx/pip install.
         shutil.copytree(ROOT / "src/nvenc_shrink", pkg / f"usr/lib/{NAME}/nvenc_shrink",
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-        put(pkg / "usr/bin/shrink-library", LAUNCHER, 0o755)
-        (pkg / "usr/bin/nvenc-shrink").symlink_to("shrink-library")
+        put(pkg / "usr/bin/nvenc-shrink", LAUNCHER, 0o755)
         for unit in (f"{NAME}.service", f"{NAME}.timer"):
             put(pkg / "usr/lib/systemd/system" / unit, (ROOT / "systemd" / unit).read_text())
         put(pkg / f"etc/{NAME}.conf", (ROOT / f"etc/{NAME}.conf").read_text())
@@ -158,8 +156,7 @@ def main():
         keyring.chmod(0o644)
 
         man = pkg / "usr/share/man/man1"
-        gz(man / "shrink-library.1.gz", man_page())
-        (man / "nvenc-shrink.1.gz").symlink_to("shrink-library.1.gz")
+        gz(man / "nvenc-shrink.1.gz", man_page())
 
         doc = pkg / f"usr/share/doc/{NAME}"
         put(doc / "README.md", (ROOT / "README.md").read_text())
