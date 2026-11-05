@@ -22,6 +22,9 @@ NAME = "nvenc-shrink"
 REPO_URL = "https://jxadhd.github.io/nvenc-shrink/apt"
 KEYRING = f"/usr/share/keyrings/{NAME}-archive-keyring.gpg"
 SOURCES = f"/etc/apt/sources.list.d/{NAME}.sources"
+CONF = f"/etc/{NAME}.conf"
+DEFAULT_CONF = f"/usr/share/{NAME}/{NAME}.conf"   # shipped default; /etc copy is the admin's
+CONF_STAMP = f"/var/lib/{NAME}/default-conf.sha256"  # hash of the default last installed
 
 CONTROL = f"""Package: {NAME}
 Version: {VERSION}
@@ -43,7 +46,31 @@ Description: safely re-encode a media library to HEVC to save disk space
 POSTINST = f"""#!/bin/sh
 set -e
 mkdir -p /var/lib/{NAME}
+chmod 700 /var/lib/{NAME}  # state lists the whole library
 if [ -d /run/systemd/system ]; then systemctl daemon-reload || true; fi
+
+# Config: {CONF} belongs to the admin. It's created on first install, and after that
+# an edited file is never replaced and never prompts. If the shipped default changed,
+# print a notice so the admin can compare. A file nobody edited follows the new default.
+if [ "$1" = configure ]; then
+    new=$(sha256sum {DEFAULT_CONF} | cut -d' ' -f1)
+    old=$(cat {CONF_STAMP} 2>/dev/null || true)
+    if [ ! -e {CONF} ]; then
+        cp {DEFAULT_CONF} {CONF}
+    elif [ -n "$old" ] && [ "$old" != "$new" ]; then
+        if [ "$(sha256sum {CONF} | cut -d' ' -f1)" = "$old" ]; then
+            cp {DEFAULT_CONF} {CONF}
+        else
+            echo "{NAME}: the default config changed in this version. Your {CONF} was kept as it is."
+            echo "  Compare with: diff -u {CONF} {DEFAULT_CONF}"
+        fi
+    fi
+    echo "$new" > {CONF_STAMP}
+    if ! out=$(/usr/bin/{NAME} --check-config 2>&1 >/dev/null); then
+        echo "{NAME}: warning: ${{out#{NAME}: }}"
+        echo "  Your config was left unchanged. Fix it, then check with: {NAME} --check-config"
+    fi
+fi
 
 # On first install only, add the project's apt repository so `apt upgrade` delivers new
 # versions, unless something already points at it (e.g. `extrepo enable {NAME}`).
@@ -73,7 +100,7 @@ POSTRM = f"""#!/bin/sh
 set -e
 if [ -d /run/systemd/system ]; then systemctl daemon-reload || true; fi
 rm -rf /usr/lib/{NAME}/nvenc_shrink/__pycache__
-if [ "$1" = purge ]; then rm -rf /var/lib/{NAME} {SOURCES}; fi
+if [ "$1" = purge ]; then rm -rf /var/lib/{NAME} {SOURCES} {CONF}; fi
 """
 
 LAUNCHER = f"""#!/usr/bin/python3
@@ -148,7 +175,7 @@ def main():
         put(pkg / "usr/bin/nvenc-shrink", LAUNCHER, 0o755)
         for unit in (f"{NAME}.service", f"{NAME}.timer"):
             put(pkg / "usr/lib/systemd/system" / unit, (ROOT / "systemd" / unit).read_text())
-        put(pkg / f"etc/{NAME}.conf", (ROOT / f"etc/{NAME}.conf").read_text())
+        put(pkg / DEFAULT_CONF.lstrip("/"), (ROOT / f"etc/{NAME}.conf").read_text())
         keyring = pkg / KEYRING.lstrip("/")
         keyring.parent.mkdir(parents=True, exist_ok=True)
         subprocess.run(["gpg", "--batch", "--yes", "--dearmor", "-o", str(keyring),
@@ -165,7 +192,6 @@ def main():
 
         deb = pkg / "DEBIAN"
         put(deb / "control", CONTROL)
-        put(deb / "conffiles", f"/etc/{NAME}.conf\n")
         put(deb / "postinst", POSTINST, 0o755)
         put(deb / "prerm", PRERM, 0o755)
         put(deb / "postrm", POSTRM, 0o755)

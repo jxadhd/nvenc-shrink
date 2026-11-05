@@ -79,8 +79,21 @@ class EndToEnd(unittest.TestCase):
         (lib / "movies" / "notes.txt.shrinking-tmp").write_text("not ours")
         # A real stale partial from an interrupted run -> removed
         (lib / "tv" / "Show S01E01.mp4.shrinking-tmp").write_bytes(b"\0" * 100)
+        # ...and a stale private work folder from an interrupted run -> removed
+        (lib / "tv" / ".nvenc-shrink-work-old").mkdir()
+        (lib / "tv" / ".nvenc-shrink-work-old" / "output.mkv").write_bytes(b"\0" * 100)
 
-        cls.before = {p: md5(p) for p in lib.rglob("*") if p.is_file()}
+        # Security: a file outside the library that must never be written to
+        cls.victim = cls.tmp / "victim.txt"
+        cls.victim.write_text("do not overwrite")
+        # a symlink planted at the predictable temp path 1.x used -> must not be followed
+        (lib / "movies" / "Film (2020).mkv.shrinking-tmp").symlink_to(cls.victim)
+        # a symlinked "video" -> skipped entirely, target untouched
+        make_clip(cls.tmp / "outside.mkv")
+        (lib / "movies" / "linked.mkv").symlink_to(cls.tmp / "outside.mkv")
+
+        cls.before = {p: md5(p) for p in [*lib.rglob("*"), cls.victim, cls.tmp / "outside.mkv"]
+                      if p.is_file() and not p.is_symlink()}
         cls.db = cls.tmp / "state.db"
         cls.result = cls.shrink("--apply", "--encoder", "libx265")
 
@@ -130,6 +143,22 @@ class EndToEnd(unittest.TestCase):
 
     def test_stale_partial_removed(self):
         self.assertFalse((self.lib / "tv" / "Show S01E01.mp4.shrinking-tmp").exists())
+        self.assertFalse((self.lib / "tv" / ".nvenc-shrink-work-old").exists())
+
+    def test_no_work_folders_left(self):
+        self.assertEqual([p for p in self.lib.rglob(".nvenc-shrink-work-*")], [])
+
+    def test_planted_symlink_not_followed(self):
+        self.assertEqual(self.victim.read_text(), "do not overwrite")
+        link = self.lib / "movies" / "Film (2020).mkv.shrinking-tmp"
+        self.assertTrue(link.is_symlink(), "cleanup must not touch links it didn't create")
+
+    def test_symlinked_video_skipped(self):
+        self.assertTrue((self.lib / "movies" / "linked.mkv").is_symlink())
+        self.assertEqual(md5(self.tmp / "outside.mkv"), self.before[self.tmp / "outside.mkv"])
+
+    def test_state_is_private(self):
+        self.assertEqual(self.db.stat().st_mode & 0o077, 0, oct(self.db.stat().st_mode))
 
     def test_rerun_is_noop(self):
         r = self.shrink("--apply", "--encoder", "libx265")
@@ -189,6 +218,31 @@ class EncoderOptions(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+class NvencCache(unittest.TestCase):
+    """The NVENC cache may only select from built-in option sets, never supply its own."""
+
+    def test_tampered_cache_cannot_inject_options(self):
+        sys.path.insert(0, str(ROOT / "src"))
+        from argparse import Namespace
+        from nvenc_shrink import cli
+        with tempfile.TemporaryDirectory() as d:
+            db = os.path.join(d, "state.db")
+            key = f"{cli.FFMPEG}|gpu={os.environ.get('CUDA_VISIBLE_DEVICES', '')}|10bit=False"
+            # old list format, with a known label but injected options
+            with open(db + ".nvenc.json", "w") as f:
+                json.dump({key: ["B-frames", ["-f", "null", "-y", "/etc/passwd"]]}, f)
+            args = Namespace(encoder="auto", db=db, ten_bit=False, redetect=False)
+            cli.select_encoder(args)
+            self.assertNotIn("/etc/passwd", args.nvenc_extra)
+            self.assertEqual(args.nvenc_extra, dict(cli.NVENC_FEATURE_LADDER)["B-frames"])
+            # unknown label -> ignored and re-detected (no GPU here, so CPU fallback)
+            with open(db + ".nvenc.json", "w") as f:
+                json.dump({key: "evil"}, f)
+            args = Namespace(encoder="auto", db=db, ten_bit=False, redetect=False)
+            cli.select_encoder(args)
+            self.assertNotIn("evil", json.dumps(args.nvenc_extra))
+
+
 class Config(unittest.TestCase):
     def test_apply_not_allowed_in_config(self):
         with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as f:
@@ -198,6 +252,23 @@ class Config(unittest.TestCase):
         os.unlink(f.name)
         self.assertNotEqual(r.returncode, 0)
         self.assertIn("--apply isn't allowed", r.stderr)
+
+    def test_bad_config_names_the_file(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".conf", delete=False) as f:
+            f.write("/tmp\n--cq 27 --no-such-option\n")
+        r = subprocess.run([sys.executable, "-m", "nvenc_shrink", "--check-config"], capture_output=True,
+                           text=True, env={**ENV, "NVENC_SHRINK_CONF": f.name})
+        os.unlink(f.name)
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn(f"problem in {f.name}", r.stderr)
+        self.assertIn("--no-such-option", r.stderr)
+        self.assertNotIn("usage:", r.stderr)
+
+    def test_check_config_accepts_shipped_template(self):
+        r = subprocess.run([sys.executable, "-m", "nvenc_shrink", "--check-config"], capture_output=True,
+                           text=True, env={**ENV, "NVENC_SHRINK_CONF": str(ROOT / "etc" / "nvenc-shrink.conf")})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("OK", r.stdout)
 
     def test_no_roots_is_a_clear_error(self):
         r = subprocess.run([sys.executable, "-m", "nvenc_shrink"], capture_output=True, text=True,

@@ -190,6 +190,10 @@ it mid-encode. If a run is interrupted, the next one cleans up the partial file.
   if your naming template includes `{MediaInfo VideoCodec}`.
 - **GPU in a container.** The container needs `libnvidia-encode` and `libnvcuvid`. If
   encodes are slow to start, enable persistence mode on the host with `nvidia-smi -pm 1`.
+- **Upgrades leave your config alone.** `/etc/nvenc-shrink.conf` is never
+  replaced or prompted about. If a new version changes the default, you'll see a
+  notice and a `diff` command. Run `nvenc-shrink --check-config` at any time to
+  see the settings it's using.
 - **One run at a time.** A lock file stops the timer and a manual run from overlapping.
 
 ## Contributing

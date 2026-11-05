@@ -11,3 +11,21 @@ Nice=10
 IOSchedulingClass=idle
 # `systemctl stop` aborts the current file, removes its partial output and leaves the original untouched.
 TimeoutStopSec=30
+
+# Runs as root because it has to read and write media owned by other users and keep
+# each file's original owner. Everything else root can do is taken away:
+CapabilityBoundingSet=CAP_CHOWN CAP_FOWNER CAP_DAC_OVERRIDE CAP_DAC_READ_SEARCH
+AmbientCapabilities=
+NoNewPrivileges=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+RestrictAddressFamilies=AF_UNIX
+UMask=0077
+# These options work everywhere, including unprivileged LXC containers. On a normal
+# host or VM you can also add filesystem sandboxing with `systemctl edit nvenc-shrink`:
+#   ProtectSystem=full
+#   ProtectHome=read-only        (only if your library isn't under /home)
+#   PrivateTmp=yes

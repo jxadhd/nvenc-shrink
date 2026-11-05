@@ -25,6 +25,7 @@ import os
 import shlex
 import shutil
 import signal
+import stat
 import sqlite3
 import subprocess
 import sys
@@ -60,7 +61,8 @@ def default_db():
     return os.path.join(state, "nvenc-shrink", "state.db")
 
 
-TMP_SUFFIX = ".shrinking-tmp"   # non-video extension: Jellyfin/Sonarr/Radarr ignore it mid-encode
+WORKDIR_PREFIX = ".nvenc-shrink-work-"  # hidden: media servers and *arr apps skip dot folders
+TMP_SUFFIX = ".shrinking-tmp"   # temp files from 1.x (written beside the original); only cleaned up now
 MUXERS = {".mkv": "matroska", ".mp4": "mp4", ".m4v": "mp4", ".mov": "mov"}
 
 
@@ -383,7 +385,7 @@ def verify(src_info, dst, args):
 # ---------------------------------------------------------------- state
 
 def open_db(path):
-    os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+    os.makedirs(os.path.dirname(os.path.abspath(path)), mode=0o700, exist_ok=True)
     db = sqlite3.connect(path)
     db.execute("""CREATE TABLE IF NOT EXISTS files (
         path TEXT PRIMARY KEY, status TEXT, reason TEXT,
@@ -410,7 +412,9 @@ def candidates(roots):
             dirnames[:] = [d for d in dirnames if not d.startswith(".") and d not in ("@eaDir", "#recycle")]
             for f in sorted(filenames):
                 p = Path(dirpath) / f
-                if p.suffix.lower() in VIDEO_EXTS and not f.startswith("."):
+                # Symlinked videos are skipped: replacing one would swap the link for a copy
+                # (and as root, a link could point anywhere).
+                if p.suffix.lower() in VIDEO_EXTS and not f.startswith(".") and not p.is_symlink():
                     yield p
 
 
@@ -424,15 +428,46 @@ def deadline_from(stop_at):
     return d if d > now else d + dt.timedelta(days=1)
 
 
+def copy_attributes(st, path):
+    """Give the new file the original's owner, mode and times, via a no-follow file handle."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        try:
+            os.fchown(fd, st.st_uid, st.st_gid)  # before chmod: chown clears setuid/setgid bits
+        except PermissionError:
+            pass  # not root: the file stays ours
+        os.fchmod(fd, stat.S_IMODE(st.st_mode))
+        os.utime(fd, ns=(st.st_atime_ns, st.st_mtime_ns))
+    except OSError as e:
+        log(f"  warning: couldn't copy file attributes: {e}")
+    finally:
+        os.close(fd)
+
+
 def cleanup_stale(roots, apply):
+    """Remove leftovers from interrupted runs. Never follows symlinks."""
+    euid = os.geteuid()
     for root in roots:
-        # Only the exact temp form this version writes: "<name>.<video ext>.shrinking-tmp".
-        stale = [p for p in Path(root).rglob(f"*{TMP_SUFFIX}")
-                 if p.is_file() and Path(p.name[:-len(TMP_SUFFIX)]).suffix.lower() in MUXERS]
-        for p in stale:
-            log(f"stale partial from an interrupted run: {p}" + (" (removing)" if apply else ""))
-            if apply:
-                p.unlink()
+        for dirpath, dirnames, filenames in os.walk(root):
+            for d in list(dirnames):
+                p = Path(dirpath) / d
+                if d.startswith(WORKDIR_PREFIX):
+                    lst = os.lstat(p)
+                    if stat.S_ISDIR(lst.st_mode) and lst.st_uid == euid:
+                        log(f"stale work folder from an interrupted run: {p}" + (" (removing)" if apply else ""))
+                        if apply:
+                            shutil.rmtree(p, ignore_errors=True)
+                    dirnames.remove(d)
+                elif d.startswith("."):
+                    dirnames.remove(d)
+            for f in filenames:  # temp files written beside originals by 1.x
+                if f.endswith(TMP_SUFFIX) and Path(f[:-len(TMP_SUFFIX)]).suffix.lower() in MUXERS:
+                    p = Path(dirpath) / f
+                    lst = os.lstat(p)
+                    if stat.S_ISREG(lst.st_mode) and lst.st_uid == euid:
+                        log(f"stale partial from an interrupted run: {p}" + (" (removing)" if apply else ""))
+                        if apply:
+                            os.unlink(p)
 
 
 def print_status(db_path):
@@ -456,6 +491,19 @@ def print_status(db_path):
             print(f"  {path}\n    {reason[:160]}")
 
 
+def check_config(args):
+    """Parse errors already exited via argparse; report what the config resolves to."""
+    print(f"config: {args.conf}" + ("" if os.path.isfile(args.conf) else " (not found, using defaults)"))
+    print("folders: " + (" ".join(args.roots) if args.roots else "none yet (add your library folders)"))
+    missing = [r for r in args.roots if not os.path.isdir(r)]
+    for r in missing:
+        print(f"warning: folder not found: {r}")
+    settings = {k: v for k, v in sorted(vars(args).items())
+                if k not in ("roots", "conf", "check_config", "status", "apply") and v not in (None, False)}
+    print("settings: " + " ".join(f"{k}={v}" for k, v in settings.items()))
+    print("OK" if not missing else "OK, with warnings")
+
+
 def select_encoder(args):
     """Resolve --encoder auto, detect NVENC features (cached), set args.nvenc_extra."""
     args.nvenc_extra = []
@@ -465,11 +513,18 @@ def select_encoder(args):
     key = f"{FFMPEG}|gpu={os.environ.get('CUDA_VISIBLE_DEVICES', '')}|10bit={args.ten_bit}"
     cache = {}
     try:
-        cache = json.load(open(cache_path))
+        with open(cache_path) as f:
+            cache = json.load(f)
     except (OSError, ValueError):
         pass
-    if key in cache and not args.redetect:
-        label, extra = cache[key]
+    # The cache stores only a label; the ffmpeg options always come from the built-in
+    # list, so editing the cache file can't inject options. Unknown labels are re-tested.
+    known = dict(NVENC_FEATURE_LADDER)
+    cached = cache.get(key)
+    cached_label = cached[0] if isinstance(cached, list) and cached else cached
+    if key in cache and not args.redetect and (cached_label is None or cached_label in known):
+        label = cached_label
+        extra = known.get(label, [])
         log(f"NVENC: {label or 'not available'} (cached; --redetect to re-test)")
     else:
         try:
@@ -477,9 +532,10 @@ def select_encoder(args):
         except RuntimeError as e:
             label, extra = None, []
             log(str(e))
-        cache[key] = [label, extra]
+        cache[key] = label
         try:
-            json.dump(cache, open(cache_path, "w"))
+            with open(cache_path, "w") as f:
+                json.dump(cache, f)
         except OSError:
             pass
         if label:
@@ -501,6 +557,8 @@ def build_parser():
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--apply", action="store_true", help="actually encode and replace (default is dry run)")
     ap.add_argument("--status", action="store_true", help="show progress and savings so far, then exit")
+    ap.add_argument("--check-config", action="store_true",
+                    help="check the config file and show the settings it gives, then exit")
     ap.add_argument("--limit", type=int, default=0, help="stop after this many files are converted")
     ap.add_argument("--encoder", default="auto", choices=["auto", "hevc_nvenc", "libx265"],
                     help="auto = NVENC if an NVIDIA GPU works, else CPU x265. Default auto")
@@ -538,19 +596,29 @@ def parse_args(argv=None):
     conf = conf_path()
     conf_roots = []
     if os.path.isfile(conf):
+        def conf_error(msg):
+            sys.exit(f"{PROG}: problem in {conf}: {msg}")
         words = []
-        for line in open(conf):
-            words += shlex.split(line, comments=True)  # per line, so a trailing "# note" is fine
-        conf_args = ap.parse_args(words)
+        try:
+            with open(conf) as f:
+                for n, line in enumerate(f, 1):
+                    words += shlex.split(line, comments=True)  # per line, so a trailing "# note" is fine
+        except ValueError as e:
+            conf_error(f"line {n}: {e}")
+        conf_parser = build_parser()
+        conf_parser.error = conf_error  # name the file, and skip the usage text
+        conf_args, unknown = conf_parser.parse_known_args(words)
+        if unknown:
+            conf_error(f"unknown option(s): {' '.join(unknown)} (see `{PROG} --help`)")
         if conf_args.apply:
-            ap.error(f"--apply isn't allowed in {conf}: keep it on the command line so a bare run stays a dry run")
+            conf_error("--apply isn't allowed here; keep it on the command line so a bare run stays a dry run")
         conf_roots = conf_args.roots
         ap.set_defaults(**{k: v for k, v in vars(conf_args).items() if k != "roots"})
     args = ap.parse_args(argv)
     args.conf = conf
     args.roots = args.roots or conf_roots
     args.db = args.db or default_db()
-    if not args.roots and not args.status:
+    if not args.roots and not (args.status or args.check_config):
         ap.error(f"no library folders given — pass them on the command line or list them in {conf}")
     return args
 
@@ -569,6 +637,9 @@ def main(argv=None):
 
 
 def run(args):
+    if args.check_config:
+        check_config(args)
+        return
     if args.status:
         print_status(args.db)
         return
@@ -585,7 +656,16 @@ def run(args):
                      + (f"Unset ${name} (`unset {name}`) or point it at a real binary." if name in os.environ
                         else "Install ffmpeg (e.g. `apt install ffmpeg`)."))
 
-    os.makedirs(os.path.dirname(os.path.abspath(args.db)), exist_ok=True)
+    # State (database, lock, NVENC cache) lists the whole library: keep it private.
+    os.umask(0o077)
+    state_dir = os.path.dirname(os.path.abspath(args.db))
+    os.makedirs(state_dir, mode=0o700, exist_ok=True)
+    for path in (args.db, args.db + ".lock", args.db + ".nvenc.json"):
+        try:
+            if os.lstat(path).st_uid == os.geteuid():
+                os.chmod(path, 0o600)  # tighten files made by older versions
+        except FileNotFoundError:
+            pass
     lock = open(args.db + ".lock", "w")
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -678,9 +758,8 @@ def run(args):
             continue
 
         out_ext = output_container(src)
-        tmp = src.with_name(f"{src.stem}{out_ext}{TMP_SUFFIX}")
         final = src.with_suffix(out_ext)
-        if final != src and final.exists():
+        if final != src and os.path.lexists(final):
             log(f"SKIP {src}: {final.name} already exists beside it")
             record(db, src, "failed", f"target {final.name} exists", size_before)
             continue
@@ -700,41 +779,35 @@ def run(args):
             record(db, src, "no-gain", f"predicted {pred}", size_before, pred)
             continue
         log(f"  samples predict ~{human(pred)} ({100 * (1 - pred / size_before):.0f}% smaller), encoding")
-        st = src.stat()
+        st = os.lstat(src)
         t0 = time.time()
+        # Encode into a fresh private directory beside the original (same filesystem, so
+        # the final rename is atomic). mkdtemp creates it 0700 with a random name, so
+        # nobody else can plant a file or symlink where ffmpeg will write.
+        work = Path(tempfile.mkdtemp(prefix=WORKDIR_PREFIX, dir=src.parent))
+        tmp = work / f"output{out_ext}"
         try:
-            encode(src, tmp, info, args)
-            verify(info, tmp, args)
-        except KeyboardInterrupt:
-            if tmp.exists():
-                tmp.unlink()
-            raise
-        except Exception as e:
-            if tmp.exists():
-                tmp.unlink()
-            log(f"  FAILED, original untouched: {e}")
-            record(db, src, "failed", str(e)[:500], size_before)
-            continue
-        size_after = tmp.stat().st_size
-        if size_after > size_before * (1 - args.min_saving):
-            tmp.unlink()
-            log(f"  no worthwhile gain ({human(size_before)} -> {human(size_after)}), keeping original")
-            record(db, src, "no-gain", "", size_before, size_after)
-            continue
-
-        # Verified: carry over permissions/ownership/mtime, then swap in.
-        try:
-            shutil.copymode(src, tmp)
             try:
-                os.chown(tmp, st.st_uid, st.st_gid)
-            except PermissionError:
-                pass
-            os.utime(tmp, (st.st_atime, st.st_mtime))
-        except OSError as e:
-            log(f"  warning: couldn't copy file attributes: {e}")
+                encode(src, tmp, info, args)
+                verify(info, tmp, args)
+            except KeyboardInterrupt:
+                raise
+            except Exception as e:
+                log(f"  FAILED, original untouched: {e}")
+                record(db, src, "failed", str(e)[:500], size_before)
+                continue
+            size_after = tmp.stat().st_size
+            if size_after > size_before * (1 - args.min_saving):
+                log(f"  no worthwhile gain ({human(size_before)} -> {human(size_after)}), keeping original")
+                record(db, src, "no-gain", "", size_before, size_after)
+                continue
 
-        src.unlink()
-        os.replace(tmp, final)
+            copy_attributes(st, tmp)
+            os.replace(tmp, final)  # atomic; replaces a link itself, never what it points to
+            if final != src:
+                os.unlink(src)
+        finally:
+            shutil.rmtree(work, ignore_errors=True)
         converted += 1
         saved += size_before - size_after
         record(db, final, "done", "", size_before, size_after)
