@@ -1,0 +1,41 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nvenc-shrink"
+dynamic = ["version"]
+description = "Safely re-encode a Jellyfin, Plex or Emby library to HEVC and get your disk space back"
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Josh Cross" }]
+requires-python = ">=3.9"
+dependencies = []
+keywords = ["jellyfin", "plex", "emby", "hevc", "h265", "x265", "nvenc", "ffmpeg", "transcode", "homelab", "media-server"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "Intended Audience :: End Users/Desktop",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Multimedia :: Video :: Conversion",
+    "Topic :: System :: Archiving :: Compression",
+]
+
+[project.urls]
+Homepage = "https://github.com/jxadhd/nvenc-shrink"
+Issues = "https://github.com/jxadhd/nvenc-shrink/issues"
+Changelog = "https://github.com/jxadhd/nvenc-shrink/blob/main/CHANGELOG.md"
+
+[project.scripts]
+shrink-library = "nvenc_shrink.cli:main"
+nvenc-shrink = "nvenc_shrink.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "nvenc_shrink.__version__" }
+
+[tool.setuptools.packages.find]
+where = ["src"]

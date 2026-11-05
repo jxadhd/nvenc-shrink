@@ -1,0 +1,10 @@
+[Unit]
+Description=Nightly media library re-encode (nvenc-shrink)
+
+[Timer]
+# Change the time with: sudo systemctl edit nvenc-shrink.timer
+OnCalendar=*-*-* 03:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,40 @@
+name: Bug report
+description: Something went wrong with a file, an encode, or the install
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you expect, and what did you get instead?
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`shrink-library --version`"
+    validations:
+      required: true
+  - type: input
+    id: ffmpeg
+    attributes:
+      label: ffmpeg version
+      description: "`ffmpeg -version | head -1`"
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      description: '`nvidia-smi -L`, or "CPU only"'
+  - type: textarea
+    id: log
+    attributes:
+      label: Log output
+      description: The lines around the problem (`journalctl -u nvenc-shrink` or terminal output)
+      render: text
+  - type: textarea
+    id: ffprobe
+    attributes:
+      label: ffprobe of the file (if file-specific)
+      description: "`ffprobe -hide_banner <file>`"
+      render: text
