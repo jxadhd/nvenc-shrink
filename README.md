@@ -19,9 +19,9 @@
 
 ```console
 $ shrink-library --apply
-checking .../Apex (2026) WEBRip-1080p.mp4  [h264 1920x872 2639 kbps, 1.8GB]
+checking .../Apex (2026).mp4  [h264 1920x872 2639 kbps, 1.8GB]
   skipping: samples predict 1.8GB -> ~2.7GB, not worth a full encode
-checking .../Whisper of the Heart (1995) Bluray-1080p.mkv  [h264 1920x1038 15956 kbps, 12.4GB]
+checking .../Whisper of the Heart (1995).mkv  [h264 1920x1038 15956 kbps, 12.4GB]
   samples predict ~5.9GB (52% smaller), encoding
 ```
 
