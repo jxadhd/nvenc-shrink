@@ -8,9 +8,11 @@ import hashlib
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 
@@ -169,6 +171,68 @@ class EndToEnd(unittest.TestCase):
         r = self.shrink("--status")
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("saved so far", r.stdout)
+        self.assertIn("No run in progress. Last run:", r.stdout)
+        self.assertIn("finished (library done)", r.stdout)
+        self.assertRegex(r.stdout, r"this run: \d+ checked, \d+ converted")
+
+
+class LiveStatus(unittest.TestCase):
+    """--status while a run is encoding, then after it's stopped or killed."""
+
+    def setUp(self):
+        if not shutil.which("ffmpeg"):
+            raise unittest.SkipTest("ffmpeg not installed")
+        self.tmp = Path(tempfile.mkdtemp(prefix="nvenc-shrink-live-"))
+        (self.tmp / "lib").mkdir()
+        make_clip(self.tmp / "lib" / "Slow.mkv", secs=20)
+        self.db = self.tmp / "state.db"
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def cmd(self, *args):
+        return [sys.executable, "-m", "nvenc_shrink", str(self.tmp / "lib"), "--db", str(self.db),
+                "--min-kbps-per-mpx", "0", "--min-saving", "0.05", "--encoder", "libx265", *args]
+
+    def status(self):
+        r = subprocess.run(self.cmd("--status"), capture_output=True, text=True,
+                           env={**ENV, "NVENC_SHRINK_CONF": "/nonexistent"})
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return r.stdout
+
+    def start_slow_run(self):
+        # Read-capped hard so the encode takes long enough to watch.
+        p = subprocess.Popen(self.cmd("--apply", "--max-read-mbps", "0.4"), stdout=subprocess.DEVNULL,
+                             stderr=subprocess.DEVNULL, env={**ENV, "NVENC_SHRINK_CONF": "/nonexistent"},
+                             start_new_session=True)
+        out = ""
+        for _ in range(120):
+            time.sleep(0.5)
+            out = self.status()
+            if "%" in out and "encoding" in out:
+                return p, out
+        p.kill()
+        self.fail("never saw the run encoding:\n" + out)
+
+    def test_current_then_interrupted(self):
+        p, out = self.start_slow_run()
+        self.assertIn("Current run: running since", out)
+        self.assertIn("encoding Slow.mkv", out)
+        self.assertRegex(out, r"\d+% \(\d+:\d\d:\d\d of 0:00:20\)")
+        self.assertIn("this run: 1 checked, 0 converted", out)
+        p.terminate()  # what `systemctl stop` sends
+        p.wait(30)
+        out = self.status()
+        self.assertIn("No run in progress", out)
+        self.assertIn("interrupted", out)
+
+    def test_killed_run_is_reported(self):
+        p, _ = self.start_slow_run()
+        os.killpg(p.pid, signal.SIGKILL)  # run and its ffmpeg, no chance to clean up
+        p.wait(30)
+        out = self.status()
+        self.assertIn("ended unexpectedly", out)
+        self.assertIn("was on:   encoding", out)
 
 
 class EncoderOptions(unittest.TestCase):
@@ -269,6 +333,19 @@ class Config(unittest.TestCase):
                            text=True, env={**ENV, "NVENC_SHRINK_CONF": str(ROOT / "etc" / "nvenc-shrink.conf")})
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertIn("OK", r.stdout)
+
+    def test_existing_state_folder_is_made_private(self):
+        """A state folder left 0755 by 1.0 is tightened to 0700 (code scanning #5)."""
+        with tempfile.TemporaryDirectory() as d:
+            state = Path(d) / "nvenc-shrink"
+            state.mkdir(mode=0o755)
+            os.chmod(state, 0o755)
+            (Path(d) / "lib").mkdir()
+            r = subprocess.run([sys.executable, "-m", "nvenc_shrink", str(Path(d) / "lib"), "--apply",
+                                "--encoder", "libx265", "--db", str(state / "state.db")],
+                               capture_output=True, text=True, env={**ENV, "NVENC_SHRINK_CONF": "/nonexistent"})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(state.stat().st_mode & 0o777, 0o700)
 
     def test_no_roots_is_a_clear_error(self):
         r = subprocess.run([sys.executable, "-m", "nvenc_shrink"], capture_output=True, text=True,

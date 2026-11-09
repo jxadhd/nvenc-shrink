@@ -137,7 +137,7 @@ It starts at 03:00. To change that, run `sudo systemctl edit nvenc-shrink.timer`
 ### Day to day
 
 ```bash
-nvenc-shrink --status                 # files done, space saved, recent failures
+nvenc-shrink --status                 # current file and progress, last runs, space saved
 journalctl -u nvenc-shrink -f         # watch tonight's run live
 sudo systemctl stop nvenc-shrink      # stop at any time, safely
 ```

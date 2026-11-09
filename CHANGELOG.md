@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.2.0 — 2026-11-09
+
+- `--status` now shows the run in progress: which file, what stage it's at
+  (sampling, encoding, verifying, replacing), and for encodes and checks the
+  percentage done, speed and time left. It also shows what this run has done
+  so far.
+- With no run in progress, `--status` shows how the last run ended (library
+  done, `--limit`, `--stop-at`, stopped with Ctrl-C or `systemctl stop`, or
+  killed/crashed, with the file it was on), plus the earlier runs.
+- As root, `--status` shows the next scheduled run, or says the nightly timer
+  is off and how to turn it on.
+- `--status` opens the state database read-only.
+
+Security (from code scanning):
+
+- A state folder created by 1.0 or 1.1 with looser permissions is now
+  tightened to 0700 on the next run. Before, only new folders were private.
+
 ## 1.1.2 — 2026-11-06
 
 - Upgrades never replace your `/etc/nvenc-shrink.conf` and never stop to ask

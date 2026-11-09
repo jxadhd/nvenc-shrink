@@ -31,6 +31,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import urllib.parse
 from pathlib import Path
 
 VIDEO_EXTS = {".mkv", ".mp4", ".m4v", ".avi", ".mov", ".wmv", ".ts", ".m2ts", ".mpg", ".mpeg", ".flv", ".webm"}
@@ -340,6 +341,7 @@ def build_cmd(src, dst, info, args):
 
 def encode(src, dst, info, args):
     cmd = build_cmd(src, dst, info, args)
+    cmd[1:1] = progress_args(args)
     r = subprocess.run(cmd, stderr=subprocess.PIPE, text=True)
     if r.returncode != 0:
         if dst.exists():
@@ -370,7 +372,7 @@ def verify(src_info, dst, args):
         raise RuntimeError("output video is not HEVC")
 
     if not args.skip_decode_check:
-        cmd = [FFMPEG, "-hide_banner", "-nostdin", "-v", "error"]
+        cmd = [FFMPEG, "-hide_banner", "-nostdin", "-v", "error", *progress_args(args)]
         if args.encoder == "hevc_nvenc" and args.hw_decode:
             cmd += ["-hwaccel", "cuda"]
         cmd += readrate_args(dst, duration_of(dst_info), args)
@@ -390,7 +392,75 @@ def open_db(path):
     db.execute("""CREATE TABLE IF NOT EXISTS files (
         path TEXT PRIMARY KEY, status TEXT, reason TEXT,
         size_before INTEGER, size_after INTEGER, updated TEXT)""")
+    db.execute("""CREATE TABLE IF NOT EXISTS runs (
+        id INTEGER PRIMARY KEY, started TEXT, ended TEXT, pid INTEGER, version TEXT, settings TEXT,
+        outcome TEXT, attempted INTEGER DEFAULT 0, converted INTEGER DEFAULT 0, saved INTEGER DEFAULT 0,
+        failed INTEGER DEFAULT 0, no_gain INTEGER DEFAULT 0,
+        current TEXT, current_size INTEGER, current_duration REAL, stage TEXT, stage_since TEXT)""")
+    db.commit()
     return db
+
+
+def now_iso():
+    return dt.datetime.now().isoformat(timespec="seconds")
+
+
+class RunLog:
+    """One row per --apply run in the `runs` table, so --status can show what a run
+    is doing right now (file, stage, progress) and how earlier runs ended."""
+
+    COUNTERS = ("attempted", "converted", "saved", "failed", "no_gain")
+
+    def __init__(self, db, settings, progress_path):
+        self.db = db
+        self.progress_path = progress_path
+        # We hold the lock, so any run still marked "running" died without cleaning up.
+        db.execute("UPDATE runs SET outcome='killed', ended=COALESCE(stage_since, started), "
+                   "current=NULL, stage=NULL WHERE outcome='running'")
+        cur = db.execute("INSERT INTO runs (started, pid, version, settings, outcome, stage, stage_since) "
+                         "VALUES (?,?,?,?,'running','starting',?)",
+                         (now_iso(), os.getpid(), __version__, settings, now_iso()))
+        db.commit()
+        self.id = cur.lastrowid
+        self.ended = False
+
+    def stage(self, stage, path=None, size=None, duration=None):
+        if stage in ("encoding", "verifying"):
+            self.clear_progress()
+        if path is None:
+            self.db.execute("UPDATE runs SET stage=?, stage_since=?, current=NULL, current_size=NULL, "
+                            "current_duration=NULL WHERE id=?", (stage, now_iso(), self.id))
+        else:
+            self.db.execute("UPDATE runs SET stage=?, stage_since=?, current=?, current_size=?, "
+                            "current_duration=? WHERE id=?", (stage, now_iso(), str(path), size, duration, self.id))
+        self.db.commit()
+
+    def count(self, field, n=1):
+        assert field in self.COUNTERS
+        self.db.execute(f"UPDATE runs SET {field} = {field} + ? WHERE id=?", (n, self.id))
+        self.db.commit()
+
+    def end(self, outcome):
+        if self.ended:
+            return
+        self.ended = True
+        self.clear_progress()
+        self.db.execute("UPDATE runs SET outcome=?, ended=?, current=NULL, current_size=NULL, "
+                        "current_duration=NULL, stage=NULL, stage_since=NULL WHERE id=?",
+                        (outcome[:300], now_iso(), self.id))
+        self.db.commit()
+
+    def clear_progress(self):
+        try:
+            os.unlink(self.progress_path)
+        except FileNotFoundError:
+            pass
+
+
+def progress_args(args):
+    """ffmpeg -progress output for --status, when a run is being tracked."""
+    runlog = getattr(args, "runlog", None)
+    return ["-progress", runlog.progress_path] if runlog else []
 
 
 def record(db, path, status, reason="", before=None, after=None):
@@ -470,14 +540,175 @@ def cleanup_stale(roots, apply):
                             os.unlink(p)
 
 
+def fmt_duration(secs):
+    secs = int(max(0, secs))
+    h, rem = divmod(secs, 3600)
+    m, s = divmod(rem, 60)
+    if h:
+        return f"{h}h {m:02d}m"
+    if m:
+        return f"{m}m {s:02d}s"
+    return f"{s}s"
+
+
+def fmt_clock(secs):
+    secs = int(max(0, secs))
+    return f"{secs // 3600}:{secs % 3600 // 60:02d}:{secs % 60:02d}"
+
+
+def read_progress(path):
+    """Latest (position in seconds, speed multiplier) from an ffmpeg -progress file."""
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 4096))
+            tail = f.read().decode(errors="replace")
+    except OSError:
+        return None, None
+    pos = speed = None
+    for line in tail.splitlines():
+        key, _, value = line.partition("=")
+        value = value.strip()
+        try:
+            if key == "out_time_us":
+                pos = int(value) / 1e6
+            elif key == "speed" and value.endswith("x"):
+                speed = float(value[:-1])
+        except ValueError:
+            continue
+    return pos, speed
+
+
+def pid_is_running(pid):
+    """True if `pid` is alive and still an nvenc-shrink process (not a reused pid)."""
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        pass  # alive, owned by someone else (e.g. root's run seen by a normal user)
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            return b"nvenc" in f.read()
+    except OSError:
+        return True  # no /proc here: trust the signal check
+
+
+def timer_status():
+    """One line about the systemd timer, or None when there is no system timer to report."""
+    if os.geteuid() != 0 or not os.path.isdir("/run/systemd/system") or not shutil.which("systemctl"):
+        return None
+    r = subprocess.run(["systemctl", "show", "nvenc-shrink.timer",
+                        "-p", "LoadState,UnitFileState,ActiveState,NextElapseUSecRealtime"],
+                       capture_output=True, text=True)
+    props = dict(line.partition("=")[::2] for line in r.stdout.splitlines())
+    if r.returncode or props.get("LoadState") != "loaded":
+        return None
+    if props.get("ActiveState") == "active" and props.get("NextElapseUSecRealtime"):
+        return f"next scheduled run: {props['NextElapseUSecRealtime']}"
+    if props.get("UnitFileState") == "enabled":
+        return "timer is enabled but not active (systemctl start nvenc-shrink.timer)"
+    return "timer is off — no nightly runs (systemctl enable --now nvenc-shrink.timer)"
+
+
+OUTCOMES = {
+    "finished": "finished (library done)",
+    "limit": "stopped at --limit",
+    "stop-at": "stopped at --stop-at",
+    "interrupted": "interrupted (stopped by Ctrl-C or systemctl stop)",
+    "killed": "ended unexpectedly (killed, crashed or power lost)",
+}
+
+
+def print_run_summary(r):
+    print(f"  this run: {r['attempted']} checked, {r['converted']} converted, "
+          f"{human(r['saved'])} saved, {r['no_gain']} not worth it, {r['failed']} failed")
+
+
+def print_current_run(r, db_path):
+    started = dt.datetime.fromisoformat(r["started"])
+    print(f"Current run: running since {started:%a %d %b %H:%M} ({fmt_duration((dt.datetime.now() - started).total_seconds())}), "
+          f"pid {r['pid']}, {PROG} {r['version']}")
+    if r["settings"]:
+        print(f"  settings: {r['settings']}")
+    stage = r["stage"] or "?"
+    since = (dt.datetime.now() - dt.datetime.fromisoformat(r["stage_since"])).total_seconds() if r["stage_since"] else 0
+    if r["current"]:
+        p = Path(r["current"])
+        size = f", {human(r['current_size'])}" if r["current_size"] else ""
+        print(f"  now:      {stage} {p.name}{size}")
+        print(f"            in {p.parent}")
+        dur = r["current_duration"] or 0
+        pos, speed = read_progress(db_path + ".progress") if stage in ("encoding", "verifying") else (None, None)
+        if pos is not None and dur:
+            line = f"{min(100, 100 * pos / dur):.0f}% ({fmt_clock(pos)} of {fmt_clock(dur)})"
+            if speed:
+                line += f", {speed:g}x, ~{fmt_duration((dur - pos) / speed)} left"
+            print(f"            {line}")
+        else:
+            print(f"            for {fmt_duration(since)}")
+    else:
+        print(f"  now:      {stage} (for {fmt_duration(since)})")
+    print_run_summary(r)
+
+
+def print_runs(rows):
+    print(f"{'started':16}  {'took':>8}  {'checked':>7}  {'converted':>9}  {'saved':>9}  {'failed':>6}  outcome")
+    for r in rows:
+        took = ""
+        if r["ended"]:
+            took = fmt_duration((dt.datetime.fromisoformat(r["ended"]) - dt.datetime.fromisoformat(r["started"])).total_seconds())
+        outcome = r["outcome"] if r["outcome"] in OUTCOMES else (r["outcome"] or "?")
+        print(f"{r['started'][:16].replace('T', ' '):16}  {took:>8}  {r['attempted']:7}  {r['converted']:9}  "
+              f"{human(r['saved']):>9}  {r['failed']:6}  {outcome}")
+
+
 def print_status(db_path):
     if not os.path.exists(db_path):
         print(f"no state yet ({db_path}) — nothing has been run with --apply")
+        line = timer_status()
+        if line:
+            print(line)
         return
-    db = sqlite3.connect(db_path)
+    # Read-only, so --status never changes state or waits on a running encode.
+    db = sqlite3.connect(f"file:{urllib.parse.quote(os.path.abspath(db_path))}?mode=ro", uri=True)
+    db.row_factory = sqlite3.Row
+    print(f"state: {db_path}\n")
+
+    has_runs = db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='runs'").fetchone()
+    runs = db.execute("SELECT * FROM runs ORDER BY id DESC LIMIT 5").fetchall() if has_runs else []
+    current = runs[0] if runs and runs[0]["outcome"] == "running" and pid_is_running(runs[0]["pid"]) else None
+    if current:
+        print_current_run(current, db_path)
+        runs = runs[1:]
+    elif runs:
+        last = runs[0]
+        outcome = "killed" if last["outcome"] == "running" else last["outcome"]
+        started = dt.datetime.fromisoformat(last["started"])
+        when = f"{started:%a %d %b %H:%M}"
+        if last["ended"]:
+            ended = dt.datetime.fromisoformat(last["ended"])
+            when += f" → {ended:%H:%M} ({fmt_duration((ended - started).total_seconds())})"
+        print(f"No run in progress. Last run: {when}, {PROG} {last['version']}")
+        print(f"  outcome:  {OUTCOMES.get(outcome, outcome)}")
+        if outcome == "killed" and last["current"]:
+            print(f"  was on:   {last['stage']} {last['current']}")
+        print_run_summary(last)
+    else:
+        print("No runs recorded yet (run history starts with version 1.2.0).")
+    line = timer_status()
+    if line:
+        print(line)
+    earlier = runs if current else runs[1:]
+    if earlier:
+        print("\nearlier runs:")
+        print_runs(earlier)
+    print()
+
     rows = db.execute("""SELECT status, COUNT(*), COALESCE(SUM(size_before),0), COALESCE(SUM(size_after),0)
                          FROM files WHERE reason NOT LIKE 'replaced by %' GROUP BY status ORDER BY status""").fetchall()
-    print(f"state: {db_path}\n")
     print(f"{'status':10} {'files':>7} {'before':>10} {'after':>10}")
     for status, n, before, after in rows:
         print(f"{status:10} {n:7} {human(before):>10} {human(after) if status == 'done' else '':>10}")
@@ -556,7 +787,8 @@ def build_parser():
     ap.add_argument("roots", nargs="*", help="library folders to scan (default: from the config file)")
     ap.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     ap.add_argument("--apply", action="store_true", help="actually encode and replace (default is dry run)")
-    ap.add_argument("--status", action="store_true", help="show progress and savings so far, then exit")
+    ap.add_argument("--status", action="store_true", help="show the current run (file, stage, progress) or how the last run ended, "
+                         "recent runs, the next scheduled run, and savings so far, then exit")
     ap.add_argument("--check-config", action="store_true",
                     help="check the config file and show the settings it gives, then exit")
     ap.add_argument("--limit", type=int, default=0, help="stop after this many files are converted")
@@ -627,13 +859,28 @@ def _raise_interrupt(signum, frame):
     raise KeyboardInterrupt
 
 
+def end_run(args, outcome):
+    runlog = getattr(args, "runlog", None)
+    if runlog:
+        try:
+            runlog.end(outcome)
+        except Exception:
+            pass  # never let bookkeeping hide the real error
+
+
 def main(argv=None):
     signal.signal(signal.SIGTERM, _raise_interrupt)  # `systemctl stop` -> same clean exit as Ctrl-C
+    args = None
     try:
-        run(parse_args(argv))
+        args = parse_args(argv)
+        run(args)
     except KeyboardInterrupt:
+        end_run(args, "interrupted")
         log("interrupted — any partial file was removed; originals are untouched")
         sys.exit(130)
+    except Exception as e:
+        end_run(args, f"error: {e}")
+        raise
 
 
 def run(args):
@@ -660,7 +907,12 @@ def run(args):
     os.umask(0o077)
     state_dir = os.path.dirname(os.path.abspath(args.db))
     os.makedirs(state_dir, mode=0o700, exist_ok=True)
-    for path in (args.db, args.db + ".lock", args.db + ".nvenc.json"):
+    # makedirs' mode only applies when it creates the folder; tighten one made by 1.0/1.1.
+    # Only a folder we own and that isn't a link (never chmod a shared dir like --db /tmp/x.db).
+    sd = os.lstat(state_dir)
+    if stat.S_ISDIR(sd.st_mode) and sd.st_uid == os.geteuid() and os.path.basename(state_dir) == "nvenc-shrink":
+        os.chmod(state_dir, 0o700)
+    for path in (args.db, args.db + ".lock", args.db + ".nvenc.json", args.db + ".progress"):
         try:
             if os.lstat(path).st_uid == os.geteuid():
                 os.chmod(path, 0o600)  # tighten files made by older versions
@@ -681,17 +933,29 @@ def run(args):
     if args.estimate_cq is None:
         args.estimate_cq = DEFAULT_ESTIMATE_CQ[args.encoder]
     mode = "APPLY" if args.apply else ("ESTIMATE" if args.estimate else "DRY RUN")
-    log(f"{PROG} {__version__} {mode}: encoder={args.encoder} cq={args.cq} 10bit={args.ten_bit} "
-        f"read-cap={args.max_read_mbps or 'none'} MB/s pause={args.pause}s roots={args.roots}")
+    settings = (f"encoder={args.encoder} cq={args.cq} 10bit={args.ten_bit} "
+                f"read-cap={args.max_read_mbps or 'none'} MB/s pause={args.pause}s")
+    log(f"{PROG} {__version__} {mode}: {settings} roots={args.roots}")
+    if args.apply:
+        if args.stop_at:
+            settings += f" stop-at={args.stop_at}"
+        if args.limit:
+            settings += f" limit={args.limit}"
+        args.runlog = RunLog(db, settings, args.db + ".progress")
+        args.runlog.stage("scanning")
+    runlog = getattr(args, "runlog", None)
 
     converted = saved = candidates_n = candidate_bytes = hardlinked = hardlinked_bytes = attempted = 0
     est_totals = {}
+    outcome = "finished"
     for src in candidates(args.roots):
         if args.limit and converted >= args.limit:
             log(f"reached --limit {args.limit}")
+            outcome = "limit"
             break
         if args.apply and deadline and dt.datetime.now() >= deadline:
             log(f"past --stop-at {args.stop_at}, stopping")
+            outcome = "stop-at"
             break
 
         state, rec_before, rec_after = known(db, src)
@@ -765,18 +1029,26 @@ def run(args):
             continue
 
         if attempted and args.pause:
+            runlog.stage("pausing between files")
             time.sleep(args.pause)  # give other IO (Jellyfin playback, scrub, arr) breathing room
         attempted += 1
+        dur = duration_of(info)
+        runlog.count("attempted")
+        runlog.stage("sampling", src, size_before, dur)
         log(f"checking {src}  [{details['codec']} {details['res']} {details['kbps']} kbps, {human(size_before)}]")
         try:
             pred, ratio = predict_size(src, info, args, args.cq)
         except Exception as e:
             log(f"  sample check failed, skipping: {e}")
             record(db, src, "failed", f"sample: {e}"[:500], size_before)
+            runlog.count("failed")
+            runlog.stage("scanning")
             continue
         if pred > size_before * (1 - args.min_saving):
             log(f"  skipping: samples predict {human(size_before)} -> ~{human(pred)}, not worth a full encode")
             record(db, src, "no-gain", f"predicted {pred}", size_before, pred)
+            runlog.count("no_gain")
+            runlog.stage("scanning")
             continue
         log(f"  samples predict ~{human(pred)} ({100 * (1 - pred / size_before):.0f}% smaller), encoding")
         st = os.lstat(src)
@@ -788,20 +1060,27 @@ def run(args):
         tmp = work / f"output{out_ext}"
         try:
             try:
+                runlog.stage("encoding", src, size_before, dur)
                 encode(src, tmp, info, args)
+                runlog.stage("verifying", src, size_before, dur)
                 verify(info, tmp, args)
             except KeyboardInterrupt:
                 raise
             except Exception as e:
                 log(f"  FAILED, original untouched: {e}")
                 record(db, src, "failed", str(e)[:500], size_before)
+                runlog.count("failed")
+                runlog.stage("scanning")
                 continue
             size_after = tmp.stat().st_size
             if size_after > size_before * (1 - args.min_saving):
                 log(f"  no worthwhile gain ({human(size_before)} -> {human(size_after)}), keeping original")
                 record(db, src, "no-gain", "", size_before, size_after)
+                runlog.count("no_gain")
+                runlog.stage("scanning")
                 continue
 
+            runlog.stage("replacing original", src, size_before, dur)
             copy_attributes(st, tmp)
             os.replace(tmp, final)  # atomic; replaces a link itself, never what it points to
             if final != src:
@@ -813,11 +1092,15 @@ def run(args):
         record(db, final, "done", "", size_before, size_after)
         if final != src:
             record(db, src, "done", f"replaced by {final.name}", size_before, size_after)
+        runlog.count("converted")
+        runlog.count("saved", size_before - size_after)
+        runlog.stage("scanning")
         mins = (time.time() - t0) / 60
         log(f"  done: {human(size_before)} -> {human(size_after)} "
             f"({100 * (1 - size_after / size_before):.0f}% smaller, {mins:.1f} min)")
 
     if args.apply:
+        runlog.end(outcome)
         log(f"finished: {converted} converted, {human(saved)} saved this run")
     else:
         if hardlinked:
